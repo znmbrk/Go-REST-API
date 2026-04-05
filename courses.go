@@ -18,11 +18,30 @@ var courses = []Course{
 
 func courseHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
+		rows, err := db.Query("select * from courses;")
+
+		if err != nil {
+			http.Error(w, "INVALID", http.StatusBadRequest)
+			return
+		}
+		defer rows.Close()
+
+		var course Course
+		var courseSlice = []Course{}
+
+		for rows.Next() {
+			err := rows.Scan(&course.ID, &course.Title, &course.Lessons)
+			if err != nil {
+				http.Error(w, "INVALID", http.StatusBadRequest)
+				return
+			}
+			courseSlice = append(courseSlice, course)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(courses)
+		json.NewEncoder(w).Encode(courseSlice)
 	} else if r.Method == "POST" {
+
 		var course = Course{}
-		w.Header().Set("Content-Type", "application/json")
 		err := json.NewDecoder(r.Body).Decode(&course)
 		if err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -32,7 +51,13 @@ func courseHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ID cannot be empty", http.StatusBadRequest)
 			return
 		}
-		courses = append(courses, course)
+
+		_, err = db.Exec("insert into courses (id, title, lessons) values ($1, $2, $3)", course.ID, course.Title, course.Lessons)
+		if err != nil {
+			http.Error(w, "Invalid insert", http.StatusInternalServerError)
+			return
+		}
+
 		json.NewEncoder(w).Encode(course)
 	} else {
 		http.Error(w, "We only support Get and Post methods rightnow", http.StatusMethodNotAllowed)
