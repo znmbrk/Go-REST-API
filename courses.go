@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/gorilla/mux"
 )
 
 type Course struct {
@@ -11,103 +13,94 @@ type Course struct {
 	Lessons int    `json:"lessons"`
 }
 
-var courses = []Course{
-	{ID: "MIM-101", Title: "Modern Incident Management", Lessons: 3},
-	{ID: "ONC", Title: "On call basics", Lessons: 5},
-}
+func courseGet(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("select * from courses;")
 
-func courseHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		rows, err := db.Query("select * from courses;")
-
-		if err != nil {
-			http.Error(w, "INVALID", http.StatusBadRequest)
-			return
-		}
-		defer rows.Close()
-
-		var course Course
-		var courseSlice = []Course{}
-
-		for rows.Next() {
-			err := rows.Scan(&course.ID, &course.Title, &course.Lessons)
-			if err != nil {
-				http.Error(w, "INVALID", http.StatusBadRequest)
-				return
-			}
-			courseSlice = append(courseSlice, course)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(courseSlice)
-	} else if r.Method == "POST" {
-
-		var course = Course{}
-		err := json.NewDecoder(r.Body).Decode(&course)
-		if err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-		if course.ID == "" {
-			http.Error(w, "ID cannot be empty", http.StatusBadRequest)
-			return
-		}
-
-		_, err = db.Exec("insert into courses (id, title, lessons) values ($1, $2, $3)", course.ID, course.Title, course.Lessons)
-		if err != nil {
-			http.Error(w, "Invalid insert", http.StatusInternalServerError)
-			return
-		}
-
-		json.NewEncoder(w).Encode(course)
-	} else {
-		http.Error(w, "We only support Get and Post methods rightnow", http.StatusMethodNotAllowed)
-	}
-}
-
-func specificCourseHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[9:]
-	matchIndex := courseLoopHelper(id)
-
-	if r.Method == "GET" {
-		if matchIndex >= 0 {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(courses[matchIndex])
-			return
-		}
-		http.Error(w, "Invalid request", http.StatusNotFound)
+	if err != nil {
+		http.Error(w, "Failed to query courses from database", http.StatusInternalServerError)
 		return
-	} else if r.Method == "PUT" {
-		if matchIndex >= 0 {
-			w.Header().Set("Content-Type", "application/json")
-			err := json.NewDecoder(r.Body).Decode(&courses[matchIndex])
-			if err != nil {
-				http.Error(w, "Error", http.StatusBadRequest)
-				return
-			}
-			json.NewEncoder(w).Encode(courses[matchIndex])
-			return
-		}
-		http.Error(w, "No ID was matched", http.StatusNotFound)
-	} else if r.Method == "DELETE" {
-		if matchIndex >= 0 {
-			toDelete := courses[matchIndex]
-			w.Header().Set("Content-Type", "application/json")
-			courses = append(courses[:matchIndex], courses[matchIndex+1:]...)
-			json.NewEncoder(w).Encode(toDelete)
-			return
-		}
-		http.Error(w, "No ID found", http.StatusNotFound)
-
-	} else {
-		http.Error(w, "Only GET method is supported for this", http.StatusMethodNotAllowed)
 	}
+	defer rows.Close()
+
+	var course Course
+	var courseSlice = []Course{}
+
+	for rows.Next() {
+		err := rows.Scan(&course.ID, &course.Title, &course.Lessons)
+		if err != nil {
+			http.Error(w, "Failed to scan course row", http.StatusInternalServerError)
+			return
+		}
+		courseSlice = append(courseSlice, course)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(courseSlice)
 }
 
-func courseLoopHelper(id string) int {
-	for i, course := range courses {
-		if course.ID == id {
-			return i
-		}
+func coursePost(w http.ResponseWriter, r *http.Request) {
+	var course = Course{}
+	err := json.NewDecoder(r.Body).Decode(&course)
+	if err != nil {
+		http.Error(w, "Failed to decode request body", http.StatusBadRequest)
+		return
 	}
-	return -1
+	if course.ID == "" {
+		http.Error(w, "ID cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec("insert into courses (id, title, lessons) values ($1, $2, $3)", course.ID, course.Title, course.Lessons)
+	if err != nil {
+		http.Error(w, "POST method failed to insert course", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(course)
+}
+
+func specificCourseGet(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["ID"]
+	var course = Course{}
+
+	err := db.QueryRow("select * from courses where id = $1", id).Scan(&course.ID, &course.Title, &course.Lessons)
+	if err != nil {
+		http.Error(w, "Failed to query course from database", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(course)
+}
+
+func specificCoursePut(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["ID"]
+	var course = Course{}
+	err := json.NewDecoder(r.Body).Decode(&course)
+	if err != nil {
+		http.Error(w, "Failed to decode request body", http.StatusBadRequest)
+		return
+	}
+	_, err = db.Exec("update courses set lessons = $1, title = $2 where id = $3", course.Lessons, course.Title, id)
+
+	if err != nil {
+		http.Error(w, "PUT method failed to update course", http.StatusInternalServerError)
+		return
+	}
+	course.ID = id
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(course)
+}
+
+func specificCourseDelete(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["ID"]
+	_, err := db.Exec("delete from courses where id = $1", id)
+	if err != nil {
+		http.Error(w, "DELETE method failed to delete course", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"deleted": id})
 }

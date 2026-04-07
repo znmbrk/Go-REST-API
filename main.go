@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 )
 
@@ -25,12 +26,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/courses", courseHandler)
-	http.HandleFunc("/courses/", specificCourseHandler)
-	http.HandleFunc("/health", healthHandler)
+	r := mux.NewRouter()
+	r.HandleFunc("/courses", courseGet).Methods("GET")
+	r.HandleFunc("/courses", coursePost).Methods("POST")
+	r.HandleFunc("/courses/{ID}", specificCourseGet).Methods("GET")
+	r.HandleFunc("/courses/{ID}", specificCoursePut).Methods("PUT")
+	r.HandleFunc("/courses/{ID}", specificCourseDelete).Methods("DELETE")
 
 	fmt.Println("Server starting on http://localhost:8080")
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":8080", r)
 
 }
